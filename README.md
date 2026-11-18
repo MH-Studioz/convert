@@ -2,7 +2,8 @@
 
 A private, browser-only file converter. Drop a file, pick a format, convert — everything runs locally with Canvas, WebAssembly and JavaScript. No uploads, no accounts, no server.
 
-**Live:** https://mh-studioz.github.io/convert/
+v1.0 out now!
+https://mh-studioz.github.io/convert/
 
 ## Features
 
