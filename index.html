@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Convert — private, browser-only file converter</title>
+  <meta name="description" content="Convert images, audio, video, spreadsheets, documents, archives and data formats entirely inside your browser. No uploads, no servers, no accounts." />
+  <meta name="theme-color" content="#191919" />
+  <meta name="color-scheme" content="dark light" />
+  <meta property="og:title" content="Convert — 100% browser-based file converter" />
+  <script>
+    try { if (localStorage.getItem('convert.theme.v1') === 'light') document.documentElement.dataset.theme = 'light'; } catch (_) {}
+  </script>
+  <meta property="og:description" content="Drop a file, pick a format, convert locally. Images, video, audio, CSV, JSON, XLSX, Markdown, PDF, ZIP and more." />
+  <meta property="og:type" content="website" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232383E2'/%3E%3Cpath d='M9 12.5h11.5l-3.2-3.2M23 19.5H11.5l3.2 3.2' stroke='white' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- Conversion engines are UMD globals so the app runs with zero build tooling -->
+  <script defer src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
+  <script defer src="app.js"></script>
+</head>
+
+<body class="app">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#main" aria-label="Convert home">
+        <span class="logo-mark"><i data-lucide="refresh-cw"></i></span>
+        <span class="brand-name">Convert</span>
+      </a>
+
+      <div class="topbar-actions">
+        <button class="icon-btn theme-toggle" id="themeToggle" type="button" title="Switch to light theme" aria-label="Switch to light theme" aria-pressed="false">
+          <i data-lucide="sun"></i>
+        </button>
+
+        <nav class="mode-switch" aria-label="Workspace mode">
+          <button class="mode-btn is-active" type="button" data-view="files" title="File converter">
+            <i data-lucide="folder-open"></i><span>Files</span>
+          </button>
+          <button class="mode-btn" type="button" data-view="data" title="Data and text converter">
+            <i data-lucide="braces"></i><span>Data</span>
+          </button>
+          <button class="mode-btn" type="button" data-view="units" title="Unit and colour converter">
+            <i data-lucide="ruler"></i><span>Units</span>
+          </button>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell" id="main">
+    <!-- ============================ FILE WORKSPACE ============================ -->
+    <section class="view" id="view-files">
+      <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Click to select a file, or drag and drop it here">
+        <div class="dz-inner">
+          <div class="dz-icon"><i data-lucide="upload"></i></div>
+          <h2>Click to select a file</h2>
+          <p class="dz-sub">or drag and drop it here</p>
+        </div>
+        <div class="dz-actions">
+          <button class="icon-btn" id="browseBtn" type="button" title="Choose files" aria-label="Choose files">
+            <i data-lucide="folder-open"></i>
+          </button>
+          <button class="icon-btn" id="pasteBtn" type="button" title="Paste image (Ctrl+V)" aria-label="Paste image from clipboard">
+            <i data-lucide="clipboard"></i>
+          </button>
+        </div>
+        <p class="dz-hint"><kbd>Ctrl</kbd> + <kbd>V</kbd> to paste · batch drops welcome · files never leave this tab</p>
+      </div>
+      <input type="file" id="fileInput" multiple class="visually-hidden" aria-hidden="true" tabindex="-1" />
+
+      <div class="options-bar" id="optionsBar" hidden>
+        <div class="opt opt-quality">
+          <label class="opt-label" for="quality">Image quality <output id="qualityVal">92%</output></label>
+          <input id="quality" type="range" min="10" max="100" step="1" value="92" class="range" />
+        </div>
+        <div class="opt">
+          <label class="opt-label" for="maxWidth">Max width</label>
+          <div class="inline-input">
+            <input id="maxWidth" type="number" min="16" max="12000" step="1" placeholder="original" inputmode="numeric" />
+            <span>px</span>
+          </div>
+        </div>
+        <label class="opt opt-check">
+          <input id="autoDownload" type="checkbox" />
+          <span>Auto-download results</span>
+        </label>
+        <div class="opt-spacer"></div>
+        <button class="btn btn-xs btn-ghost" id="logToggle" type="button">
+          <i data-lucide="terminal"></i> ffmpeg log
+        </button>
+      </div>
+
+      <section class="queue-wrap" id="queueSection" hidden aria-live="polite">
+        <div class="queue-head">
+          <div>
+            <h2>Queue <span class="count-chip" id="queueCount">0</span></h2>
+            <p class="muted" id="queueSummary">Pick an output format for each file, then convert.</p>
+          </div>
+          <div class="queue-actions">
+            <button class="btn btn-sm btn-ghost" id="zipOriginals" type="button" hidden>
+              <i data-lucide="archive"></i> Zip originals
+            </button>
+            <button class="btn btn-sm btn-ghost" id="downloadZip" type="button" hidden>
+              <i data-lucide="download"></i> Download all (.zip)
+            </button>
+            <button class="btn btn-sm btn-ghost" id="clearQueue" type="button">
+              <i data-lucide="trash-2"></i> Clear
+            </button>
+            <button class="btn btn-sm btn-primary" id="convertAll" type="button">
+              <i data-lucide="zap"></i> <span id="convertAllLabel">Convert all</span>
+            </button>
+          </div>
+        </div>
+        <div class="queue" id="queueList"></div>
+      </section>
+    </section>
+
+    <!-- ============================ DATA / TEXT ============================ -->
+    <section class="view" id="view-data" hidden>
+      <div class="section-head">
+        <div>
+          <h1>Data &amp; code converter</h1>
+          <p>JSON, CSV, TSV, YAML, XML, NDJSON, Base64, URL encoding, JWT and SQL — converted live as you type.</p>
+        </div>
+      </div>
+
+      <div class="panel data-tool">
+        <div class="conv-grid">
+          <div class="conv-pane">
+            <div class="pane-bar">
+              <label class="mini-label" for="dataInFmt">Input</label>
+              <select id="dataInFmt" class="select">
+                <option value="json">JSON</option>
+                <option value="csv">CSV</option>
+                <option value="tsv">TSV</option>
+                <option value="yaml">YAML</option>
+                <option value="xml">XML</option>
+                <option value="ndjson">NDJSON</option>
+                <option value="base64">Base64</option>
+                <option value="url">URL encoded</option>
+                <option value="jwt">JWT</option>
+              </select>
+              <div class="pane-tools">
+                <button class="btn btn-xs btn-ghost" id="dataSample" type="button">Sample</button>
+                <button class="btn btn-xs btn-ghost" id="dataClear" type="button">Clear</button>
+              </div>
+            </div>
+            <textarea id="dataInput" class="code-area" spellcheck="false" autocomplete="off" placeholder="Paste JSON, CSV, YAML, Base64, a URL-encoded string or a JWT here…"></textarea>
+            <div class="pane-bar pane-foot">
+              <span class="mono muted" id="dataInMeta">0 B</span>
+              <span class="mono muted">UTF-8</span>
+            </div>
+          </div>
+
+          <div class="conv-mid">
+            <button class="swap-btn" id="dataSwap" type="button" title="Swap input &amp; output formats" aria-label="Swap input and output formats">
+              <i data-lucide="arrow-left-right"></i>
+            </button>
+          </div>
+
+          <div class="conv-pane">
+            <div class="pane-bar">
+              <label class="mini-label" for="dataOutFmt">Output</label>
+              <select id="dataOutFmt" class="select">
+                <option value="json">JSON</option>
+                <option value="csv">CSV</option>
+                <option value="tsv">TSV</option>
+                <option value="yaml">YAML</option>
+                <option value="xml">XML</option>
+                <option value="ndjson">NDJSON</option>
+                <option value="base64">Base64</option>
+                <option value="url">URL encoded</option>
+                <option value="sql">SQL INSERT</option>
+                <option value="html">HTML table</option>
+              </select>
+              <div class="pane-tools">
+                <button class="btn btn-xs btn-ghost" id="dataFormat" type="button" title="Pretty print">Format</button>
+                <button class="btn btn-xs btn-ghost" id="dataMinify" type="button" title="Remove whitespace">Minify</button>
+                <button class="btn btn-xs btn-ghost" id="dataCopy" type="button" title="Copy output">Copy</button>
+                <button class="btn btn-xs btn-ghost" id="dataDownload" type="button" title="Download output">Save</button>
+              </div>
+            </div>
+            <textarea id="dataOutput" class="code-area" readonly spellcheck="false" placeholder="Converted output appears here…"></textarea>
+            <div class="pane-bar pane-foot">
+              <span class="mono" id="dataStatus">Ready</span>
+              <span class="mono muted" id="dataOutMeta"></span>
+            </div>
+          </div>
+        </div>
+        <p class="tool-foot">
+          <i data-lucide="lock"></i> Parsing happens in this tab. A JWT is decoded locally — never sent to a server for verification.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================ UNITS / COLOR ============================ -->
+    <section class="view" id="view-units" hidden>
+      <div class="section-head">
+        <div>
+          <h1>Unit &amp; developer converter</h1>
+          <p>Storage, time, frequency, CSS units and colour formats — type in any field and the rest follow.</p>
+        </div>
+      </div>
+
+      <div class="unit-grid">
+        <div class="panel unit-card">
+          <div class="unit-head">
+            <span class="mini-icon"><i data-lucide="database"></i></span>
+            <div><h3>Data storage</h3><p>Decimal KB vs binary KiB</p></div>
+          </div>
+          <div class="unit-rows">
+            <label class="unit-row"><span class="unit-label">Bytes</span><input class="unit-input" data-group="storage" data-unit="B" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">B</span></label>
+            <label class="unit-row"><span class="unit-label">Kilobytes</span><input class="unit-input" data-group="storage" data-unit="KB" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">KB</span></label>
+            <label class="unit-row"><span class="unit-label">Megabytes</span><input class="unit-input" data-group="storage" data-unit="MB" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">MB</span></label>
+            <label class="unit-row"><span class="unit-label">Gigabytes</span><input class="unit-input" data-group="storage" data-unit="GB" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">GB</span></label>
+            <label class="unit-row"><span class="unit-label">Terabytes</span><input class="unit-input" data-group="storage" data-unit="TB" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">TB</span></label>
+            <label class="unit-row"><span class="unit-label">Kibibytes</span><input class="unit-input" data-group="storage" data-unit="KiB" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">KiB</span></label>
+            <label class="unit-row"><span class="unit-label">Mebibytes</span><input class="unit-input" data-group="storage" data-unit="MiB" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">MiB</span></label>
+            <label class="unit-row"><span class="unit-label">Gibibytes</span><input class="unit-input" data-group="storage" data-unit="GiB" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">GiB</span></label>
+          </div>
+        </div>
+
+        <div class="unit-card-stack">
+          <div class="panel unit-card">
+            <div class="unit-head">
+              <span class="mini-icon"><i data-lucide="clock"></i></span>
+              <div><h3>Time</h3><p>Nanoseconds to days</p></div>
+            </div>
+            <div class="unit-rows">
+              <label class="unit-row"><span class="unit-label">Nanoseconds</span><input class="unit-input" data-group="duration" data-unit="ns" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">ns</span></label>
+              <label class="unit-row"><span class="unit-label">Microseconds</span><input class="unit-input" data-group="duration" data-unit="µs" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">µs</span></label>
+              <label class="unit-row"><span class="unit-label">Milliseconds</span><input class="unit-input" data-group="duration" data-unit="ms" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">ms</span></label>
+              <label class="unit-row"><span class="unit-label">Seconds</span><input class="unit-input" data-group="duration" data-unit="s" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">s</span></label>
+              <label class="unit-row"><span class="unit-label">Minutes</span><input class="unit-input" data-group="duration" data-unit="min" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">min</span></label>
+              <label class="unit-row"><span class="unit-label">Hours</span><input class="unit-input" data-group="duration" data-unit="h" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">h</span></label>
+              <label class="unit-row"><span class="unit-label">Days</span><input class="unit-input" data-group="duration" data-unit="day" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">day</span></label>
+            </div>
+          </div>
+
+          <div class="panel unit-card">
+            <div class="unit-head">
+              <span class="mini-icon"><i data-lucide="activity"></i></span>
+              <div><h3>Frequency</h3><p>Hz through GHz and RPM</p></div>
+            </div>
+            <div class="unit-rows">
+              <label class="unit-row"><span class="unit-label">Hertz</span><input class="unit-input" data-group="frequency" data-unit="Hz" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">Hz</span></label>
+              <label class="unit-row"><span class="unit-label">Kilohertz</span><input class="unit-input" data-group="frequency" data-unit="kHz" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">kHz</span></label>
+              <label class="unit-row"><span class="unit-label">Megahertz</span><input class="unit-input" data-group="frequency" data-unit="MHz" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">MHz</span></label>
+              <label class="unit-row"><span class="unit-label">Gigahertz</span><input class="unit-input" data-group="frequency" data-unit="GHz" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">GHz</span></label>
+              <label class="unit-row"><span class="unit-label">RPM</span><input class="unit-input" data-group="frequency" data-unit="rpm" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">rpm</span></label>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel unit-card">
+          <div class="unit-head">
+            <span class="mini-icon"><i data-lucide="type"></i></span>
+            <div><h3>CSS units</h3><p>px ↔ rem ↔ em and friends</p></div>
+          </div>
+          <div class="unit-settings">
+            <label>Root font size <span class="inline-input sm"><input id="cssRemBase" type="number" min="1" max="100" step="1" value="16" inputmode="numeric" /><span>px</span></span></label>
+            <label>Viewport width <span class="inline-input sm"><input id="cssViewport" type="number" min="100" max="10000" step="10" value="1440" inputmode="numeric" /><span>px</span></span></label>
+          </div>
+          <div class="unit-rows">
+            <label class="unit-row"><span class="unit-label">Pixels</span><input class="unit-input" data-group="css" data-unit="px" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">px</span></label>
+            <label class="unit-row"><span class="unit-label">Root em</span><input class="unit-input" data-group="css" data-unit="rem" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">rem</span></label>
+            <label class="unit-row"><span class="unit-label">Em</span><input class="unit-input" data-group="css" data-unit="em" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">em</span></label>
+            <label class="unit-row"><span class="unit-label">Points</span><input class="unit-input" data-group="css" data-unit="pt" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">pt</span></label>
+            <label class="unit-row"><span class="unit-label">Viewport width</span><input class="unit-input" data-group="css" data-unit="vw" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">vw</span></label>
+            <label class="unit-row"><span class="unit-label">Percent</span><input class="unit-input" data-group="css" data-unit="%" inputmode="decimal" placeholder="0" autocomplete="off" /><span class="unit-suffix">%</span></label>
+          </div>
+        </div>
+
+        <div class="panel unit-card color-card">
+          <div class="unit-head">
+            <span class="mini-icon"><i data-lucide="palette"></i></span>
+            <div><h3>Colour converter</h3><p>HEX ↔ RGB ↔ HSL with a live swatch</p></div>
+            <button class="btn btn-xs btn-ghost color-copy" id="colorCopy" type="button"><i data-lucide="copy"></i> Copy CSS</button>
+          </div>
+          <div class="color-body">
+            <div class="color-swatch" id="colorSwatch" aria-live="polite">
+              <span class="swatch-label mono" id="colorHexLabel">#2383E2</span>
+            </div>
+            <div class="color-fields">
+              <div class="color-row">
+                <label class="field-label" for="colorHex">HEX</label>
+                <input id="colorHex" class="field mono" value="#2383E2" spellcheck="false" autocomplete="off" />
+                <input id="colorPicker" class="color-picker" type="color" value="#2383e2" aria-label="Pick a colour" />
+              </div>
+              <div class="color-triplet">
+                <label><span>R</span><input id="colorR" class="field mono" type="number" min="0" max="255" step="1" value="35" /></label>
+                <label><span>G</span><input id="colorG" class="field mono" type="number" min="0" max="255" step="1" value="131" /></label>
+                <label><span>B</span><input id="colorB" class="field mono" type="number" min="0" max="255" step="1" value="226" /></label>
+              </div>
+              <div class="color-triplet">
+                <label><span>H</span><input id="colorH" class="field mono" type="number" min="0" max="360" step="1" value="210" /></label>
+                <label><span>S</span><input id="colorS" class="field mono" type="number" min="0" max="100" step="1" value="77" /></label>
+                <label><span>L</span><input id="colorL" class="field mono" type="number" min="0" max="100" step="1" value="51" /></label>
+              </div>
+              <code class="color-css mono" id="colorCss">rgb(35 131 226)</code>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ HISTORY ============================ -->
+    <section class="panel history" id="historySection">
+      <div class="history-head">
+        <div>
+          <h2><i data-lucide="history"></i> Conversion history</h2>
+          <p class="muted" id="historySummary">Stored only in this browser.</p>
+        </div>
+        <button class="btn btn-xs btn-ghost" id="clearHistory" type="button">
+          <i data-lucide="trash-2"></i> Clear history
+        </button>
+      </div>
+      <div class="history-list" id="historyList"></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <span>© 2026 Convert</span>
+      <span class="footer-note"><i data-lucide="lock"></i> 100% local · no uploads · no accounts</span>
+    </div>
+  </footer>
+
+  <div id="toasts" class="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
+
+  <aside class="log-panel" id="logPanel" hidden aria-label="ffmpeg terminal log">
+    <div class="log-head">
+      <span class="mono"><i data-lucide="terminal"></i> ffmpeg log</span>
+      <div class="log-actions">
+        <button class="btn btn-xs btn-ghost" id="logClear" type="button">Clear</button>
+        <button class="icon-btn" id="logClose" type="button" aria-label="Close log"><i data-lucide="x"></i></button>
+      </div>
+    </div>
+    <pre id="logOutput" class="log-output mono"></pre>
+  </aside>
+
+  <noscript>
+    <div class="noscript">Convert needs JavaScript because the conversion engine runs inside your browser — there is no server to fall back to.</div>
+  </noscript>
+</body>
+</html>
