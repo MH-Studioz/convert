@@ -3622,6 +3622,19 @@ function initTheme() {
    BOOT
    ========================================================================== */
 
+function registerOfflineWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  const secure = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  if (!secure) return;
+  const register = () => {
+    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).catch(() => {
+      /* offline support is optional; conversion still works online */
+    });
+  };
+  if (document.readyState === 'complete') register();
+  else window.addEventListener('load', register, { once: true });
+}
+
 function init() {
   loadHistory();
   renderHistory();
@@ -3642,6 +3655,7 @@ function init() {
 
   refreshIcons();
   renderQueue();
+  registerOfflineWorker();
 }
 
 if (document.readyState === 'loading') {
